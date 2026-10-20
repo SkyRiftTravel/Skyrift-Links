@@ -222,7 +222,7 @@
       background: rgb(255 0 85 / 3%);
       color: var(--pink);
       box-shadow: 0 0 25px rgb(255 0 85 / 78%), 0 0 10px #fff, 0 0 44px rgb(255 0 85 / 35%), inset 0 0 14px rgb(255 0 85 / 16%);
-      animation: micro-glitch .1s steps(4, end) 1;
+      animation: micro-glitch .1s steps(4, end) 2, electric-arc .22s steps(3, end) 3;
       outline: 1px solid rgb(255 0 85 / 52%);
       outline-offset: 3px;
     }
@@ -256,7 +256,7 @@
       background: rgb(255 0 85 / 4%);
       color: #fff;
       box-shadow: 0 0 25px rgb(255 0 85 / 78%), 0 0 10px #fff, 0 0 44px rgb(255 0 85 / 35%), inset 0 0 14px rgb(255 0 85 / 16%);
-      animation: donation-hover .38s ease-out 1, micro-glitch .1s steps(4, end) 1;
+      animation: donation-hover .38s ease-out 1, micro-glitch .1s steps(4, end) 2, electric-arc .22s steps(3, end) 3;
     }
 
     .link--donate::after {
@@ -315,6 +315,11 @@
       20% { transform: translate(2px, -1px) skewX(-1deg); }
       45% { transform: translate(-2px, 0) skewX(1deg); }
       70% { transform: translate(1px, -1px); }
+    }
+    @keyframes electric-arc {
+      0%, 100% { box-shadow: 0 0 12px rgb(255 0 85 / 45%), 0 0 3px #fff, inset 0 0 8px rgb(255 0 85 / 8%); }
+      35% { box-shadow: 0 0 28px rgb(255 0 85 / 95%), 0 0 12px #fff, 0 0 48px rgb(255 0 85 / 62%), inset 0 0 18px rgb(255 0 85 / 24%); }
+      68% { box-shadow: 0 0 18px rgb(0 240 255 / 80%), 0 0 7px #fff, 0 0 38px rgb(255 0 85 / 65%), inset 0 0 13px rgb(255 0 85 / 18%); }
     }
     @keyframes laser-sweep {
       0% { left: -70%; opacity: 0; }
@@ -398,52 +403,71 @@
       const canvas = document.getElementById("lightning-canvas");
       const context = canvas.getContext("2d");
       const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-      const bolts = [];
-      const boltCount = 5;
+      const strikeInterval = 10000;
+      const strikeDuration = 380;
+      const impactFlashDuration = 50;
+      const sparks = [];
       let width = 0;
       let height = 0;
       let pixelRatio = 1;
       let animationFrame = 0;
-      let lastFrame = 0;
-      let elapsed = 0;
-      let flashFrames = 0;
+      let nextStrikeAt = 0;
+      let currentStrike = null;
 
       function random(min, max) {
         return min + Math.random() * (max - min);
       }
 
-      function makeBolt(index) {
-        const length = Math.min(random(220, 390), Math.max(150, Math.min(width, height) * 0.62));
-        const segmentCount = Math.floor(random(18, 28));
-        const vx = random(18, 42) * (Math.random() < 0.5 ? -1 : 1);
-        const vy = random(15, 36) * (Math.random() < 0.5 ? -1 : 1);
-        const points = Array.from({ length: segmentCount + 1 }, (_, pointIndex) => {
-          const progress = pointIndex / segmentCount;
-          return {
-            progress,
-            offset: pointIndex === 0 || pointIndex === segmentCount ? 0 : random(-24, 24),
-            jitterAmplitude: pointIndex === 0 || pointIndex === segmentCount ? 0 : random(5, 16),
-            jitterPhase: random(0, Math.PI * 2),
-            jitterSpeed: random(7, 15)
-          };
-        });
+      function makePath(start, endY, endX, stepSize) {
+        const points = [start];
+        let y = start.y;
+
+        while (y < endY) {
+          y = Math.min(endY, y + random(stepSize * 0.55, stepSize * 1.45));
+          points.push({
+            x: points[points.length - 1].x + random(-width * 0.085, width * 0.085),
+            y
+          });
+        }
+
+        points[points.length - 1].x = endX;
+        return points;
+      }
+
+      function createStrike(timestamp) {
+        const impactY = random(height * 0.58, height * 0.92);
+        const startX = random(width * 0.18, width * 0.82);
+        const trunk = makePath(
+          { x: startX, y: -20 },
+          impactY,
+          startX + random(-width * 0.2, width * 0.2),
+          Math.max(14, height / 27)
+        );
+        const branchCount = Math.floor(random(2, 4));
+        const branches = [];
+
+        for (let index = 0; index < branchCount; index += 1) {
+          const originIndex = Math.floor(random(trunk.length * 0.38, trunk.length * 0.82));
+          const origin = trunk[originIndex];
+          const direction = Math.random() < 0.5 ? -1 : 1;
+          const branchEndX = Math.max(
+            0,
+            Math.min(width, origin.x + direction * random(width * 0.12, width * 0.3))
+          );
+          const branchEndY = Math.min(height, origin.y + random(height * 0.12, height * 0.3));
+          branches.push({
+            originIndex,
+            points: makePath(origin, branchEndY, branchEndX, Math.max(12, height / 34))
+          });
+        }
 
         return {
-          index,
-          x: random(0, width),
-          y: random(0, height),
-          vx,
-          vy,
-          angle: Math.atan2(vy, vx),
-          length,
-          points,
-          headWidth: random(6, 8),
-          tailWidth: random(0.7, 1),
-          phase: random(0, Math.PI * 2),
-          sway: random(1.6, 2.8),
-          waveLength: random(7, 11),
-          waveAmplitude: random(8, 17),
-          flashTimer: random(5, 13)
+          startedAt: timestamp,
+          impactAt: null,
+          trunk,
+          branches,
+          impact: trunk[trunk.length - 1],
+          duration: strikeDuration
         };
       }
 
@@ -456,50 +480,39 @@
         canvas.style.width = `${width}px`;
         canvas.style.height = `${height}px`;
         context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-        for (const bolt of bolts) {
-          bolt.x = Math.min(width, Math.max(0, bolt.x));
-          bolt.y = Math.min(height, Math.max(0, bolt.y));
-        }
       }
 
-      function drawBolt(bolt, time) {
+      function drawPath(points, progress, headWidth, tailWidth) {
+        const segmentCount = Math.max(0, Math.ceil((points.length - 1) * progress));
+        if (segmentCount === 0) return;
+
         context.save();
-        context.translate(bolt.x, bolt.y);
-        context.rotate(bolt.angle);
-        context.lineCap = "round";
-        context.lineJoin = "round";
+        context.lineCap = "square";
+        context.lineJoin = "miter";
         context.shadowColor = "#00f0ff";
         context.shadowBlur = 8;
 
-        const renderedPoints = bolt.points.map((point) => {
-          const envelope = Math.sin(Math.PI * point.progress);
-          const wave =
-            Math.sin(time * bolt.sway - point.progress * bolt.waveLength + bolt.phase) +
-            0.28 * Math.sin(time * bolt.sway * 1.7 - point.progress * bolt.waveLength * 1.9 + bolt.phase * 1.3);
-          const crackle = Math.sin(time * point.jitterSpeed + point.jitterPhase) * point.jitterAmplitude;
-          const x = -point.progress * bolt.length + Math.cos(time * bolt.sway - point.progress * bolt.waveLength + bolt.phase) * envelope * 3;
-          const y = (point.offset + wave * bolt.waveAmplitude + crackle) * envelope;
-          return { x, y };
-        });
-
-        for (let i = 0; i < renderedPoints.length - 1; i += 1) {
-          const start = renderedPoints[i];
-          const end = renderedPoints[i + 1];
-          const progress = i / (renderedPoints.length - 1);
-          const segmentWidth = bolt.headWidth + (bolt.tailWidth - bolt.headWidth) * progress;
+        for (let index = 0; index < segmentCount; index += 1) {
+          const start = points[index];
+          const end = points[index + 1];
+          const reveal = Math.min(1, (points.length - 1) * progress - index);
+          const endX = start.x + (end.x - start.x) * reveal;
+          const endY = start.y + (end.y - start.y) * reveal;
+          const taper = index / Math.max(1, points.length - 1);
+          const lineWidth = headWidth + (tailWidth - headWidth) * taper;
 
           context.beginPath();
           context.moveTo(start.x, start.y);
-          context.lineTo(end.x, end.y);
+          context.lineTo(endX, endY);
           context.strokeStyle = "#00f0ff";
-          context.lineWidth = segmentWidth;
+          context.lineWidth = lineWidth;
           context.stroke();
 
           context.beginPath();
           context.moveTo(start.x, start.y);
-          context.lineTo(end.x, end.y);
+          context.lineTo(endX, endY);
           context.strokeStyle = "#ffffff";
-          context.lineWidth = Math.max(0.45, segmentWidth * 0.28);
+          context.lineWidth = Math.max(0.7, lineWidth * 0.3);
           context.stroke();
         }
 
@@ -508,64 +521,96 @@
 
       function animate(timestamp) {
         animationFrame = window.requestAnimationFrame(animate);
-        if (!lastFrame) lastFrame = timestamp;
-        const delta = Math.min((timestamp - lastFrame) / 1000, 0.04);
-        lastFrame = timestamp;
-        elapsed += delta;
         context.clearRect(0, 0, width, height);
 
-        if (flashFrames === 0 && Math.random() < 0.02) {
-          flashFrames = Math.random() < 0.35 ? 1 : 2;
+        if (!currentStrike && timestamp >= nextStrikeAt) {
+          currentStrike = createStrike(timestamp);
+          nextStrikeAt += strikeInterval;
+          while (nextStrikeAt <= timestamp) nextStrikeAt += strikeInterval;
         }
-        if (flashFrames > 0) {
-          context.fillStyle = "rgba(0, 240, 255, 0.15)";
+
+        if (!currentStrike) return;
+
+        const strikeElapsed = timestamp - currentStrike.startedAt;
+        const strikeProgress = Math.min(1, strikeElapsed / currentStrike.duration);
+        if (strikeProgress < 1) {
+          drawPath(currentStrike.trunk, strikeProgress, 8, 1);
+          for (const branch of currentStrike.branches) {
+            if (strikeProgress > branch.originIndex / (currentStrike.trunk.length - 1)) {
+              const branchProgress = Math.min(
+                1,
+                (strikeProgress - branch.originIndex / (currentStrike.trunk.length - 1)) * 2.4
+              );
+              drawPath(branch.points, branchProgress, 3.5, 0.8);
+            }
+          }
+        } else if (currentStrike.impactAt === null) {
+          currentStrike.impactAt = timestamp;
+          for (let index = 0; index < 50; index += 1) {
+            const angle = random(-Math.PI, 0);
+            const speed = random(80, 360);
+            sparks.push({
+              x: currentStrike.impact.x,
+              y: currentStrike.impact.y,
+              vx: Math.cos(angle) * speed,
+              vy: Math.sin(angle) * speed,
+              life: random(0.45, 1.1),
+              age: 0,
+              size: random(1, 3)
+            });
+          }
+        }
+
+        if (currentStrike.impactAt !== null) {
+          const impactElapsed = timestamp - currentStrike.impactAt;
+          if (impactElapsed < impactFlashDuration) {
+            context.fillStyle = "rgba(0, 240, 255, 0.15)";
           context.fillRect(0, 0, width, height);
-          flashFrames -= 1;
-        }
-
-        for (const bolt of bolts) {
-          bolt.x += bolt.vx * delta;
-          bolt.y += bolt.vy * delta;
-          if (bolt.x < 0) {
-            bolt.x = 0;
-            bolt.vx = Math.abs(bolt.vx);
-          } else if (bolt.x > width) {
-            bolt.x = width;
-            bolt.vx = -Math.abs(bolt.vx);
           }
-          if (bolt.y < 0) {
-            bolt.y = 0;
-            bolt.vy = Math.abs(bolt.vy);
-          } else if (bolt.y > height) {
-            bolt.y = height;
-            bolt.vy = -Math.abs(bolt.vy);
-          }
-          bolt.angle = Math.atan2(bolt.vy, bolt.vx);
 
-          drawBolt(bolt, elapsed);
+          const boltFade = Math.max(0, 1 - impactElapsed / 260);
+          if (boltFade > 0) {
+            context.save();
+            context.globalAlpha = boltFade;
+            drawPath(currentStrike.trunk, 1, 8, 1);
+            for (const branch of currentStrike.branches) drawPath(branch.points, 1, 3.5, 0.8);
+            context.restore();
+          }
+
+          const delta = Math.min(1 / 30, Math.max(0, (timestamp - (animate.lastSparkFrame || timestamp)) / 1000));
+          animate.lastSparkFrame = timestamp;
+          for (let index = sparks.length - 1; index >= 0; index -= 1) {
+            const spark = sparks[index];
+            spark.age += delta;
+            spark.vy += 420 * delta;
+            spark.x += spark.vx * delta;
+            spark.y += spark.vy * delta;
+            if (spark.age >= spark.life) {
+              sparks.splice(index, 1);
+              continue;
+            }
+            context.globalAlpha = 1 - spark.age / spark.life;
+            context.fillStyle = "#00f0ff";
+            context.fillRect(spark.x, spark.y, spark.size, spark.size);
+          }
+          context.globalAlpha = 1;
+
+          if (impactElapsed > 1150 && sparks.length === 0) currentStrike = null;
         }
       }
 
       function start() {
-        if (animationFrame) return;
-        if (!bolts.length) {
-          for (let i = 0; i < boltCount; i += 1) bolts.push(makeBolt(i));
-        }
-        if (reducedMotion.matches) {
-          context.clearRect(0, 0, width, height);
-          bolts.forEach((bolt) => drawBolt(bolt, elapsed));
-          return;
-        }
+        if (animationFrame || reducedMotion.matches) return;
+        nextStrikeAt = performance.now() + strikeInterval;
         animationFrame = window.requestAnimationFrame(animate);
       }
 
       function stop() {
         window.cancelAnimationFrame(animationFrame);
         animationFrame = 0;
-        lastFrame = 0;
-        flashFrames = 0;
+        currentStrike = null;
+        sparks.length = 0;
         context.clearRect(0, 0, width, height);
-        bolts.forEach((bolt) => drawBolt(bolt, elapsed));
       }
 
       resize();
